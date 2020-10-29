@@ -167,12 +167,16 @@ namespace Microsoft.Azure.WebJobs.Extensions.DurableTask
 
             IDurableOrchestrationClient client = this.GetClient(request);
             Stopwatch stopwatch = Stopwatch.StartNew();
+
+            // This retry loop completes either when the
+            // orchestration has completed, or when the timeout is reached.
             while (true)
             {
                 DurableOrchestrationStatus status = null;
 
                 if (client is DurableClient durableClient && durableClient.DurabilityProvider.SupportsPollFreeWait)
                 {
+                    // For durability providers that support efficient (poll-free) waiting, we take advantage of that API
                     try
                     {
                         var state = await durableClient.DurabilityProvider.WaitForOrchestrationAsync(instanceId, null, timeout, CancellationToken.None);
@@ -180,10 +184,14 @@ namespace Microsoft.Azure.WebJobs.Extensions.DurableTask
                     }
                     catch (TimeoutException)
                     {
+                        // The orchestration did not complete.
+                        // Depending on the implementation of the backend, we may get here before the full timeout has elapsed,
+                        // so we recheck how much time has elapsed below, and retry if there is time left.
                     }
                 }
                 else
                 {
+                    // For durability providers that do not support efficient (poll-free) waiting, we do explicit retries.
                     status = await client.GetStatusAsync(instanceId);
                 }
 
@@ -717,13 +725,15 @@ namespace Microsoft.Azure.WebJobs.Extensions.DurableTask
                 TimeSpan? timeout = GetTimeSpan(request, "timeout");
                 TimeSpan? pollingInterval = GetTimeSpan(request, "pollingInterval");
 
+                // for durability providers that support poll-free waiting, we override the specified polling interval
+                if (client is DurableClient durableClient && durableClient.DurabilityProvider.SupportsPollFreeWait)
+                {
+                    pollingInterval = timeout;
+                }
+
                 if (timeout.HasValue && pollingInterval.HasValue)
                 {
                     return await client.WaitForCompletionOrCreateCheckStatusResponseAsync(request, id, timeout.Value, pollingInterval.Value);
-                }
-                else if (timeout.HasValue && client is DurableClient durableClient && durableClient.DurabilityProvider.SupportsPollFreeWait)
-                {
-                    return await client.WaitForCompletionOrCreateCheckStatusResponseAsync(request, id, timeout.Value, timeout.Value);
                 }
                 else
                 {

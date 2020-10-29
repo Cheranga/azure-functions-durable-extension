@@ -71,6 +71,7 @@ namespace Microsoft.Azure.WebJobs.Extensions.DurableTask
 
         string IDurableEntityClient.TaskHubName => this.TaskHubName;
 
+        /// <inheritdoc/>
         public override string ToString()
         {
             return $"DurableClient[backend={this.config.GetBackendInfo()}]";
@@ -534,10 +535,14 @@ namespace Microsoft.Azure.WebJobs.Extensions.DurableTask
                          tasks.Add(CheckForOrphanedLockAndFixIt(state, status.LockedBy));
                     }
 
-                    if (removeEmptyEntities && !status.EntityExists && status.LockedBy == null && status.QueueSize == 0
-                        && now - state.LastUpdatedTime > this.config.MessageReorderWindow)
+                    if (removeEmptyEntities)
                     {
-                        tasks.Add(DeleteIdleOrchestrationEntity(state));
+                        bool isEmptyEntity = !status.EntityExists && status.LockedBy == null && status.QueueSize == 0;
+                        bool safeToRemoveWithoutBreakingMessageSorterLogic = now - state.LastUpdatedTime > this.config.MessageReorderWindow;
+                        if (isEmptyEntity && safeToRemoveWithoutBreakingMessageSorterLogic)
+                        {
+                            tasks.Add(DeleteIdleOrchestrationEntity(state));
+                        }
                     }
                 }
 
